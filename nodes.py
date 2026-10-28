@@ -42,7 +42,7 @@ def get_available_model_names():
 
 
 class SenseNovaCode2VideoLoader:
-    """Loads SenseNova-6.8-Code2Video with native ComfyUI INT8 quantization support."""
+    """Loads SenseNova-6.8-Code2Video with native ComfyUI INT8 quantization support, returning a standard CLIP object."""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -56,8 +56,8 @@ class SenseNovaCode2VideoLoader:
             }
         }
 
-    RETURN_TYPES = ("SENSENOVA_MODEL", "CLIP")
-    RETURN_NAMES = ("model", "clip")
+    RETURN_TYPES = ("CLIP",)
+    RETURN_NAMES = ("clip",)
     FUNCTION = "load_model"
     CATEGORY = "Code2Video"
 
@@ -70,9 +70,15 @@ class SenseNovaCode2VideoLoader:
             cache_quantized=cache_quantized,
         )
 
-        # Build dummy or compatible CLIP wrapper for node ecosystem compatibility
-        clip_wrapper = comfy.sd.CLIP(pipeline.model)
-        return (pipeline, clip_wrapper)
+        class PreloadedTarget:
+            def __init__(self, m, t):
+                self.params = {}
+                self.clip = lambda **kwargs: m
+                self.tokenizer = lambda **kwargs: t
+
+        clip_wrapper = comfy.sd.CLIP(PreloadedTarget(pipeline.model, pipeline.tokenizer))
+        clip_wrapper.pipeline = pipeline
+        return (clip_wrapper,)
 
 
 class SenseNovaCode2VideoSettings:
@@ -113,7 +119,7 @@ class SenseNovaCode2VideoStudio:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "model": ("SENSENOVA_MODEL",),
+                "clip": ("CLIP",),
                 "prompt": ("STRING", {
                     "multiline": True,
                     "default": "",
@@ -141,7 +147,7 @@ class SenseNovaCode2VideoStudio:
 
     def generate_video(
         self,
-        model: SenseNovaPipeline,
+        clip: Any,
         prompt: str,
         settings: Optional[Dict[str, Any]] = None,
         session_id: str = "",
@@ -182,11 +188,14 @@ class SenseNovaCode2VideoStudio:
             height=settings.get("height", 720),
         )
 
+        # Fallback if 'model' was passed from legacy workflow
+        active_model = clip if clip is not None else kwargs.get("model")
+
         # 5. Run agentic execution turn loop
         logger.info(f"Starting Code2Video turn for session: {active_session_id}")
         run_session_turn(
             session=session,
-            pipeline=model,
+            pipeline=active_model,
             system_prompt=system_prompt,
             user_instruction=instruction,
             vision_tensors=vision_tensors,

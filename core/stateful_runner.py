@@ -157,8 +157,13 @@ def run_session_turn(
         # Format input prompt
         chatml_text = format_chatml_prompt(session.messages)
 
-        # Tokenize
-        tokens = pipeline.tokenizer.tokenize_with_weights(chatml_text)
+        # Tokenize (supports comfy.sd.CLIP or SenseNovaPipeline)
+        if hasattr(pipeline, "tokenize"):
+            tokens = pipeline.tokenize(chatml_text)
+        elif hasattr(pipeline, "tokenizer"):
+            tokens = pipeline.tokenizer.tokenize_with_weights(chatml_text)
+        else:
+            raise TypeError(f"Provided model/clip object has no tokenizer: {type(pipeline)}")
 
         # Generate tokens
         logger.info(f"Generating tokens for session {session.session_id} (turn {current_turn + 1})...")
@@ -170,26 +175,51 @@ def run_session_turn(
 
         generated_text = ""
         try:
-            # Call Qwen35TEModel generate
-            gen_output = pipeline.model.generate(
-                tokens,
-                do_sample=(temperature > 0.0),
-                max_length=max_tokens,
-                temperature=temperature,
-                top_p=top_p,
-                min_p=0.0,
-                repetition_penalty=1.05,
-                seed=42,
-            )
+            if hasattr(pipeline, "generate"):
+                gen_output = pipeline.generate(
+                    tokens,
+                    do_sample=(temperature > 0.0),
+                    max_length=max_tokens,
+                    temperature=temperature,
+                    top_p=top_p,
+                    min_p=0.0,
+                    repetition_penalty=1.05,
+                    seed=42,
+                )
+            elif hasattr(pipeline, "model") and hasattr(pipeline.model, "generate"):
+                gen_output = pipeline.model.generate(
+                    tokens,
+                    do_sample=(temperature > 0.0),
+                    max_length=max_tokens,
+                    temperature=temperature,
+                    top_p=top_p,
+                    min_p=0.0,
+                    repetition_penalty=1.05,
+                    seed=42,
+                )
+            else:
+                raise TypeError(f"Provided model/clip object has no generate method: {type(pipeline)}")
 
             # Decode output tokens
+            decoder_fn = getattr(pipeline, "decode", None)
+            if decoder_fn is None and hasattr(pipeline, "tokenizer"):
+                decoder_fn = getattr(pipeline.tokenizer, "decode", None)
+
             if isinstance(gen_output, list) and len(gen_output) > 0:
                 gen_ids = gen_output[0]
-                generated_text = pipeline.tokenizer.decode(gen_ids)
+                generated_text = decoder_fn(gen_ids) if decoder_fn else str(gen_ids)
             elif isinstance(gen_output, torch.Tensor):
-                generated_text = pipeline.tokenizer.decode(gen_output.squeeze().tolist())
+                token_list = gen_output.squeeze().tolist()
+                generated_text = decoder_fn(token_list) if decoder_fn else str(token_list)
             elif isinstance(gen_output, str):
                 generated_text = gen_output
+            elif isinstance(gen_output, tuple) and len(gen_output) > 0:
+                first_item = gen_output[0]
+                if isinstance(first_item, (list, torch.Tensor)):
+                    ids = first_item if isinstance(first_item, list) else first_item.squeeze().tolist()
+                    generated_text = decoder_fn(ids) if decoder_fn else str(ids)
+                elif isinstance(first_item, str):
+                    generated_text = first_item
 
         except Exception as e:
             logger.error(f"Error during token generation: {e}")
