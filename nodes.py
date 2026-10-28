@@ -3,9 +3,6 @@ import logging
 from typing import Dict, Any, Tuple, Optional
 import torch
 
-import folder_paths
-import comfy.sd
-from core.quantizer_loader import build_sensenova_model, SenseNovaPipeline
 from core.prompt_guides import build_system_message, AVAILABLE_CRAFTS
 from core.tool_harness import ToolHarness
 from core.media import (
@@ -17,68 +14,6 @@ from core.media import (
 from core.stateful_runner import _SessionStore, run_session_turn, send_server_event
 
 logger = logging.getLogger("ComfyUI-Code2Video")
-
-
-def get_available_model_names():
-    """Scans registered model directories for available Code2Video checkpoints."""
-    names = []
-    folders = []
-    if "code2video" in folder_paths.folder_names_and_paths:
-        folders.extend(folder_paths.get_folder_paths("code2video"))
-    if "text_encoders" in folder_paths.folder_names_and_paths:
-        folders.extend(folder_paths.get_folder_paths("text_encoders"))
-
-    for f in folders:
-        if os.path.isdir(f):
-            for entry in os.listdir(f):
-                full_p = os.path.join(f, entry)
-                if os.path.isdir(full_p) or entry.endswith(".safetensors"):
-                    if entry not in names:
-                        names.append(entry)
-
-    if not names:
-        names.append("sensenova/SenseNova-6.8-Code2Video")
-    return names
-
-
-class SenseNovaCode2VideoLoader:
-    """Loads SenseNova-6.8-Code2Video with native ComfyUI INT8 quantization support, returning a standard CLIP object."""
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        models = get_available_model_names()
-        return {
-            "required": {
-                "model_name": (models, {"default": models[0]}),
-                "quantization": (["int8_convrot", "int8_tensorwise", "none (bf16)"], {"default": "int8_convrot"}),
-                "device": (["auto", "cuda", "mps", "cpu"], {"default": "auto"}),
-                "cache_quantized": ("BOOLEAN", {"default": True, "label_on": "cache to disk", "label_off": "do not cache"}),
-            }
-        }
-
-    RETURN_TYPES = ("CLIP",)
-    RETURN_NAMES = ("clip",)
-    FUNCTION = "load_model"
-    CATEGORY = "Code2Video"
-
-    def load_model(self, model_name: str, quantization: str, device: str, cache_quantized: bool):
-        logger.info(f"Loading SenseNova Code2Video model: {model_name} (quantization: {quantization})...")
-        pipeline = build_sensenova_model(
-            model_path_or_name=model_name,
-            quantization=quantization,
-            device_name=device,
-            cache_quantized=cache_quantized,
-        )
-
-        class PreloadedTarget:
-            def __init__(self, m, t):
-                self.params = {}
-                self.clip = lambda **kwargs: m
-                self.tokenizer = lambda **kwargs: t
-
-        clip_wrapper = comfy.sd.CLIP(PreloadedTarget(pipeline.model, pipeline.tokenizer))
-        clip_wrapper.pipeline = pipeline
-        return (clip_wrapper,)
 
 
 class SenseNovaCode2VideoSettings:
