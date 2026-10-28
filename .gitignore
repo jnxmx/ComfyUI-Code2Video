@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.DS_Store
+
+# Temporary outputs and sessions
+temp/
+out/
+*.safetensors
+*.bin
+*.pt
+
+# Virtual environments
+.venv/
+venv/
+env/
