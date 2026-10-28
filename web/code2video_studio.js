@@ -277,14 +277,20 @@ function initStudioNode(node) {
         app.queuePrompt(0, 1);
     });
 
+    // Helper to match session even with truncated or newly initialized session IDs
+    function matchesSession(id) {
+        if (!id || !currentSessionId) return true;
+        return id === currentSessionId || id.startsWith(currentSessionId) || currentSessionId.startsWith(id);
+    }
+
     // WebSocket event listeners
     let accumulatedText = "";
 
     api.addEventListener("code2video_thinking", ({ detail }) => {
-        if (detail.session_id !== currentSessionId && currentSessionId) return;
+        if (!matchesSession(detail.session_id)) return;
         currentSessionId = detail.session_id || currentSessionId;
         sessionBadge.textContent = currentSessionId.slice(0, 8);
-        if (sessionWidget) sessionWidget.value = currentSessionId;
+        if (sessionWidget && sessionWidget.value !== currentSessionId) sessionWidget.value = currentSessionId;
 
         // Show live token burn stats
         burnBadge.style.display = "inline-flex";
@@ -320,10 +326,10 @@ function initStudioNode(node) {
     });
 
     api.addEventListener("code2video_status", ({ detail }) => {
-        if (detail.session_id !== currentSessionId && currentSessionId) return;
+        if (!matchesSession(detail.session_id)) return;
         currentSessionId = detail.session_id || currentSessionId;
         sessionBadge.textContent = currentSessionId.slice(0, 8);
-        if (sessionWidget) sessionWidget.value = currentSessionId;
+        if (sessionWidget && sessionWidget.value !== currentSessionId) sessionWidget.value = currentSessionId;
 
         statusDot.className = `c2v-status-dot ${detail.status}`;
         statusText.textContent = detail.status.charAt(0).toUpperCase() + detail.status.slice(1);
@@ -340,7 +346,7 @@ function initStudioNode(node) {
     });
 
     api.addEventListener("code2video_token", ({ detail }) => {
-        if (detail.session_id !== currentSessionId && currentSessionId) return;
+        if (!matchesSession(detail.session_id)) return;
         const entry = document.createElement("div");
         entry.className = "c2v-log-entry";
         entry.textContent = detail.token;
@@ -349,7 +355,7 @@ function initStudioNode(node) {
     });
 
     api.addEventListener("code2video_tool_executing", ({ detail }) => {
-        if (detail.session_id !== currentSessionId && currentSessionId) return;
+        if (!matchesSession(detail.session_id)) return;
         const entry = document.createElement("div");
         entry.className = "c2v-log-entry c2v-log-tool";
         entry.textContent = `⚙ Tool ${detail.function}: ${JSON.stringify(detail.params)}`;
@@ -358,10 +364,10 @@ function initStudioNode(node) {
     });
 
     api.addEventListener("code2video_preview_ready", ({ detail }) => {
-        if (detail.session_id !== currentSessionId && currentSessionId) return;
+        if (!matchesSession(detail.session_id)) return;
         currentSessionId = detail.session_id;
         sessionBadge.textContent = currentSessionId.slice(0, 8);
-        if (sessionWidget) sessionWidget.value = currentSessionId;
+        if (sessionWidget && sessionWidget.value !== currentSessionId) sessionWidget.value = currentSessionId;
 
         // Set iframe source
         iframe.src = detail.url;

@@ -2,6 +2,7 @@ import os
 import re
 import uuid
 import time
+import types
 import logging
 from typing import Dict, Any, List, Optional, Tuple
 import torch
@@ -14,22 +15,27 @@ logger = logging.getLogger("ComfyUI-Code2Video")
 
 def find_transformer_with_sampler(obj: Any) -> Optional[Any]:
     """Locates the underlying transformer module that implements sample_token."""
+    if obj is None:
+        return None
     if hasattr(obj, "sample_token"):
         return obj
-    if hasattr(obj, "transformer") and hasattr(obj.transformer, "sample_token"):
-        return obj.transformer
-    csm = getattr(obj, "cond_stage_model", None)
-    if csm:
-        if hasattr(csm, "transformer") and hasattr(csm.transformer, "sample_token"):
-            return csm.transformer
-        for _, ch in csm.named_children():
-            if hasattr(ch, "transformer") and hasattr(ch.transformer, "sample_token"):
-                return ch.transformer
-            if hasattr(ch, "sample_token"):
-                return ch
-    m = getattr(obj, "model", None)
-    if m:
-        return find_transformer_with_sampler(m)
+    if hasattr(obj, "transformer"):
+        res = find_transformer_with_sampler(obj.transformer)
+        if res is not None:
+            return res
+    if hasattr(obj, "cond_stage_model"):
+        res = find_transformer_with_sampler(obj.cond_stage_model)
+        if res is not None:
+            return res
+    if hasattr(obj, "named_children"):
+        for _, ch in obj.named_children():
+            res = find_transformer_with_sampler(ch)
+            if res is not None:
+                return res
+    if hasattr(obj, "model"):
+        res = find_transformer_with_sampler(obj.model)
+        if res is not None:
+            return res
     return None
 
 
@@ -208,8 +214,9 @@ def run_session_turn(
 
         if transformer is not None and hasattr(transformer, "sample_token"):
             orig_sample_token = transformer.sample_token
+            logger.info("Hooking sample_token on transformer for live thinking preview.")
 
-            def hooked_sample_token(*args, **kwargs):
+            def hooked_sample_token(self, *args, **kwargs):
                 next_tok = orig_sample_token(*args, **kwargs)
                 try:
                     tok_id = next_tok.item() if next_tok.numel() == 1 else next_tok[0, 0].item()
@@ -237,7 +244,7 @@ def run_session_turn(
                     logger.debug(f"Error in thinking stream hook: {err}")
                 return next_tok
 
-            transformer.sample_token = hooked_sample_token
+            transformer.sample_token = types.MethodType(hooked_sample_token, transformer)
 
         try:
             if hasattr(pipeline, "generate"):
