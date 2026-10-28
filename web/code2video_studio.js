@@ -98,6 +98,7 @@ function initStudioNode(node) {
             <div class="c2v-status-badge">
                 <span class="c2v-status-dot idle"></span>
                 <span class="c2v-status-text">Idle</span>
+                <span class="c2v-burn-badge" style="display:none;"><span class="burn-icon">🔥</span> <span class="burn-tokens">0</span> tok (<span class="burn-tps">0</span> t/s)</span>
             </div>
             <div style="display:flex; align-items:center; gap:8px;">
                 <div class="c2v-gauge-slot"></div>
@@ -106,13 +107,33 @@ function initStudioNode(node) {
         </div>
 
         <div class="c2v-tabs">
-            <button class="c2v-tab-btn active" data-tab="preview">Live Preview</button>
-            <button class="c2v-tab-btn" data-tab="code">Generated Code</button>
-            <button class="c2v-tab-btn" data-tab="logs">Execution Logs</button>
+            <button class="c2v-tab-btn active" data-tab="thinking">🧠 Thinking Stream</button>
+            <button class="c2v-tab-btn" data-tab="preview">🎬 Live Preview</button>
+            <button class="c2v-tab-btn" data-tab="code">💻 Generated Code</button>
+            <button class="c2v-tab-btn" data-tab="logs">📋 Execution Logs</button>
+        </div>
+
+        <!-- Tab 0: Thinking & Live Burning Stream -->
+        <div class="c2v-panel active" data-panel="thinking">
+            <div class="c2v-thinking-header">
+                <div style="font-weight: 600; color: #c084fc; display: flex; align-items: center; gap: 6px;">
+                    <span class="c2v-status-dot thinking"></span>
+                    <span>Model Reasoning & Code Synthesis</span>
+                </div>
+                <div class="c2v-thinking-stats">
+                    <span class="c2v-stat-pill burning">🔥 <span class="stat-burn-count">0</span> tok</span>
+                    <span class="c2v-stat-pill speed">⚡ <span class="stat-burn-speed">0.0</span> t/s</span>
+                    <span class="c2v-stat-pill">⏱ <span class="stat-burn-time">0.0s</span></span>
+                </div>
+            </div>
+            <div class="c2v-thinking-stream">
+                <div class="c2v-stream-content">Awaiting prompt generation...</div>
+                <span class="c2v-thinking-cursor" style="display: none;"></span>
+            </div>
         </div>
 
         <!-- Tab 1: Preview -->
-        <div class="c2v-panel active" data-panel="preview">
+        <div class="c2v-panel" data-panel="preview">
             <div class="c2v-preview-wrapper">
                 <iframe class="c2v-preview-iframe" sandbox="allow-scripts allow-same-origin"></iframe>
             </div>
@@ -149,6 +170,15 @@ function initStudioNode(node) {
     const statusDot = container.querySelector(".c2v-status-dot");
     const statusText = container.querySelector(".c2v-status-text");
     const sessionBadge = container.querySelector(".c2v-session-id");
+    const burnBadge = container.querySelector(".c2v-burn-badge");
+    const burnTokens = container.querySelector(".burn-tokens");
+    const burnTps = container.querySelector(".burn-tps");
+    const statBurnCount = container.querySelector(".stat-burn-count");
+    const statBurnSpeed = container.querySelector(".stat-burn-speed");
+    const statBurnTime = container.querySelector(".stat-burn-time");
+    const streamContent = container.querySelector(".c2v-stream-content");
+    const thinkingCursor = container.querySelector(".c2v-thinking-cursor");
+    const thinkingStream = container.querySelector(".c2v-thinking-stream");
     const iframe = container.querySelector(".c2v-preview-iframe");
     const slider = container.querySelector(".c2v-slider");
     const timeDisplay = container.querySelector(".c2v-time-display");
@@ -164,13 +194,15 @@ function initStudioNode(node) {
     // Tab switching logic
     const tabBtns = container.querySelectorAll(".c2v-tab-btn");
     const panels = container.querySelectorAll(".c2v-panel");
+
+    function switchTab(tabName) {
+        tabBtns.forEach(b => b.classList.toggle("active", b.getAttribute("data-tab") === tabName));
+        panels.forEach(p => p.classList.toggle("active", p.getAttribute("data-panel") === tabName));
+    }
+
     tabBtns.forEach(btn => {
         btn.addEventListener("click", () => {
-            const tabName = btn.getAttribute("data-tab");
-            tabBtns.forEach(b => b.classList.remove("active"));
-            panels.forEach(p => p.classList.remove("active"));
-            btn.classList.add("active");
-            container.querySelector(`[data-panel="${tabName}"]`).classList.add("active");
+            switchTab(btn.getAttribute("data-tab"));
         });
     });
 
@@ -246,6 +278,47 @@ function initStudioNode(node) {
     });
 
     // WebSocket event listeners
+    let accumulatedText = "";
+
+    api.addEventListener("code2video_thinking", ({ detail }) => {
+        if (detail.session_id !== currentSessionId && currentSessionId) return;
+        currentSessionId = detail.session_id || currentSessionId;
+        sessionBadge.textContent = currentSessionId.slice(0, 8);
+        if (sessionWidget) sessionWidget.value = currentSessionId;
+
+        // Show live token burn stats
+        burnBadge.style.display = "inline-flex";
+        burnTokens.textContent = detail.burn_count;
+        burnTps.textContent = detail.tps;
+        statBurnCount.textContent = detail.burn_count;
+        statBurnSpeed.textContent = detail.tps;
+        statBurnTime.textContent = detail.elapsed + "s";
+        thinkingCursor.style.display = "inline-block";
+
+        statusDot.className = "c2v-status-dot thinking";
+        statusText.textContent = detail.is_thinking ? "Thinking..." : "Synthesizing...";
+
+        if (detail.burn_count === 1) {
+            streamContent.innerHTML = "";
+            accumulatedText = "";
+            switchTab("thinking");
+        }
+
+        accumulatedText += detail.chunk;
+
+        // Render thinking chunks with formatted thought bubbles
+        if (accumulatedText.includes("<think>") || accumulatedText.includes("<thought>")) {
+            let formatted = accumulatedText
+                .replace(/<(think|thought)>([\s\S]*?)<\/\1>/gi, '<div class="c2v-thought-bubble"><div class="c2v-thought-title">🧠 Thought Process</div>$2</div>')
+                .replace(/<(think|thought)>([\s\S]*)$/gi, '<div class="c2v-thought-bubble"><div class="c2v-thought-title">🧠 Thought Process (Active)</div>$2</div>');
+            streamContent.innerHTML = formatted;
+        } else {
+            streamContent.textContent = accumulatedText;
+        }
+
+        thinkingStream.scrollTop = thinkingStream.scrollHeight;
+    });
+
     api.addEventListener("code2video_status", ({ detail }) => {
         if (detail.session_id !== currentSessionId && currentSessionId) return;
         currentSessionId = detail.session_id || currentSessionId;
@@ -254,6 +327,10 @@ function initStudioNode(node) {
 
         statusDot.className = `c2v-status-dot ${detail.status}`;
         statusText.textContent = detail.status.charAt(0).toUpperCase() + detail.status.slice(1);
+
+        if (detail.status === "completed" || detail.status === "paused" || detail.status === "error") {
+            thinkingCursor.style.display = "none";
+        }
 
         const entry = document.createElement("div");
         entry.className = "c2v-log-entry";
@@ -290,6 +367,8 @@ function initStudioNode(node) {
         iframe.src = detail.url;
         statusDot.className = "c2v-status-dot ready";
         statusText.textContent = "Preview Ready";
+        thinkingCursor.style.display = "none";
+        switchTab("preview");
 
         // Update code view
         if (detail.code) {

@@ -1,6 +1,7 @@
 import os
 import re
 import uuid
+import time
 import logging
 from typing import Dict, Any, List, Optional, Tuple
 import torch
@@ -9,6 +10,27 @@ import comfy.model_management
 from core.tool_harness import ToolHarness
 
 logger = logging.getLogger("ComfyUI-Code2Video")
+
+
+def find_transformer_with_sampler(obj: Any) -> Optional[Any]:
+    """Locates the underlying transformer module that implements sample_token."""
+    if hasattr(obj, "sample_token"):
+        return obj
+    if hasattr(obj, "transformer") and hasattr(obj.transformer, "sample_token"):
+        return obj.transformer
+    csm = getattr(obj, "cond_stage_model", None)
+    if csm:
+        if hasattr(csm, "transformer") and hasattr(csm.transformer, "sample_token"):
+            return csm.transformer
+        for _, ch in csm.named_children():
+            if hasattr(ch, "transformer") and hasattr(ch.transformer, "sample_token"):
+                return ch.transformer
+            if hasattr(ch, "sample_token"):
+                return ch
+    m = getattr(obj, "model", None)
+    if m:
+        return find_transformer_with_sampler(m)
+    return None
 
 
 def send_server_event(event_name: str, data: Dict[str, Any]):
@@ -165,15 +187,58 @@ def run_session_turn(
         else:
             raise TypeError(f"Provided model/clip object has no tokenizer: {type(pipeline)}")
 
-        # Generate tokens
+        # Generate tokens with live Thinking & Burning Preview hook
         logger.info(f"Generating tokens for session {session.session_id} (turn {current_turn + 1})...")
         send_server_event("code2video_status", {
             "session_id": session.session_id,
-            "status": "generating",
+            "status": "thinking",
             "turn": current_turn + 1,
         })
 
         generated_text = ""
+        decoder_fn = getattr(pipeline, "decode", None)
+        if decoder_fn is None and hasattr(pipeline, "tokenizer"):
+            decoder_fn = getattr(pipeline.tokenizer, "decode", None)
+
+        start_time = time.time()
+        burn_count = [0]
+        in_thought = [False]
+        transformer = find_transformer_with_sampler(pipeline)
+        orig_sample_token = None
+
+        if transformer is not None and hasattr(transformer, "sample_token"):
+            orig_sample_token = transformer.sample_token
+
+            def hooked_sample_token(*args, **kwargs):
+                next_tok = orig_sample_token(*args, **kwargs)
+                try:
+                    tok_id = next_tok.item() if next_tok.numel() == 1 else next_tok[0, 0].item()
+                    burn_count[0] += 1
+                    chunk = decoder_fn([tok_id]) if decoder_fn else ""
+                    elapsed = max(0.001, time.time() - start_time)
+                    tps = burn_count[0] / elapsed
+
+                    lower = chunk.lower()
+                    if "<think>" in lower or "<thought>" in lower:
+                        in_thought[0] = True
+                    elif "</think>" in lower or "</thought>" in lower:
+                        in_thought[0] = False
+
+                    send_server_event("code2video_thinking", {
+                        "session_id": session.session_id,
+                        "token_id": tok_id,
+                        "chunk": chunk,
+                        "burn_count": burn_count[0],
+                        "tps": round(tps, 1),
+                        "is_thinking": in_thought[0],
+                        "elapsed": round(elapsed, 1),
+                    })
+                except Exception as err:
+                    logger.debug(f"Error in thinking stream hook: {err}")
+                return next_tok
+
+            transformer.sample_token = hooked_sample_token
+
         try:
             if hasattr(pipeline, "generate"):
                 gen_output = pipeline.generate(
@@ -200,11 +265,6 @@ def run_session_turn(
             else:
                 raise TypeError(f"Provided model/clip object has no generate method: {type(pipeline)}")
 
-            # Decode output tokens
-            decoder_fn = getattr(pipeline, "decode", None)
-            if decoder_fn is None and hasattr(pipeline, "tokenizer"):
-                decoder_fn = getattr(pipeline.tokenizer, "decode", None)
-
             if isinstance(gen_output, list) and len(gen_output) > 0:
                 gen_ids = gen_output[0]
                 generated_text = decoder_fn(gen_ids) if decoder_fn else str(gen_ids)
@@ -230,6 +290,9 @@ def run_session_turn(
                 "error": str(e),
             })
             raise e
+        finally:
+            if transformer is not None and orig_sample_token is not None:
+                transformer.sample_token = orig_sample_token
 
         # Stream generated response to UI
         send_server_event("code2video_token", {

@@ -44,6 +44,25 @@
     animation: c2v-pulse 1.2s infinite;
 }
 
+.c2v-status-dot.thinking {
+    background: #a855f7;
+    box-shadow: 0 0 10px #a855f7;
+    animation: c2v-pulse 0.9s infinite;
+}
+
+.c2v-burn-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-family: monospace;
+    font-size: 11px;
+    background: rgba(168, 85, 247, 0.15);
+    border: 1px solid rgba(168, 85, 247, 0.3);
+    color: #c084fc;
+    padding: 2px 8px;
+    border-radius: 4px;
+}
+
 .c2v-status-dot.ready {
     background: #10b981;
     box-shadow: 0 0 8px #10b981;
@@ -275,4 +294,99 @@
 .c2v-tag-item:hover, .c2v-tag-item.active {
     background: #4f46e5;
     color: #fff;
+}
+
+/* Thinking & Burning Preview Stream Styles */
+.c2v-thinking-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #27272a;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+}
+
+.c2v-thinking-stats {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.c2v-stat-pill {
+    background: #18181b;
+    border: 1px solid #3f3f46;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: monospace;
+    color: #cbd5e1;
+}
+
+.c2v-stat-pill.burning {
+    color: #f59e0b;
+    border-color: rgba(245, 158, 11, 0.4);
+    background: rgba(245, 158, 11, 0.1);
+}
+
+.c2v-stat-pill.speed {
+    color: #a855f7;
+    border-color: rgba(168, 85, 247, 0.4);
+    background: rgba(168, 85, 247, 0.1);
+}
+
+.c2v-thinking-stream {
+    width: 100%;
+    height: 280px;
+    background: #09090b;
+    color: #e2e8f0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 11px;
+    line-height: 1.5;
+    padding: 10px;
+    border-radius: 6px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    box-sizing: border-box;
+    border: 1px solid #27272a;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.c2v-thought-bubble {
+    background: rgba(88, 28, 135, 0.18);
+    border: 1px solid rgba(168, 85, 247, 0.35);
+    border-radius: 6px;
+    padding: 8px 10px;
+    color: #e9d5ff;
+    font-style: italic;
+    margin-bottom: 4px;
+}
+
+.c2v-thought-title {
+    font-weight: 600;
+    font-style: normal;
+    color: #c084fc;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.c2v-thinking-cursor {
+    display: inline-block;
+    width: 7px;
+    height: 13px;
+    background: #a855f7;
+    vertical-align: middle;
+    animation: c2v-cursor 0.8s infinite;
+    margin-left: 2px;
+}
+
+@keyframes c2v-cursor {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
 }
